@@ -30,6 +30,7 @@ module skidbuffer #(
     assign dbg_tmp_reg        = tmp_reg;
     assign dbg_out_full       = out_full;
     assign dbg_tmp_full       = tmp_full;
+    assign dbg_in_ready_early = in_ready_early;
 
     // Ready NEXT cycle if downstream is draining now, or the skid slot will still be free.
     // (Standard register-slice early-ready form;
