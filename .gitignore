@@ -1,0 +1,8 @@
+# Ignore everything by default...
+/*
+
+# ...except the things we explicitly track
+!.gitignore
+!README.md
+!src/
+!image/

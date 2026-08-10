@@ -1,14 +1,6 @@
 `timescale 1ns/1ps
 //=====================================================================
-// skidbuffer_dbg_tb.sv
-// Watches the skid buffer's internal registers and flags via the debug
-// ports, printing a per-cycle table. You control in_valid / out_ready
-// each cycle in the stimulus loop and can see exactly how out_reg /
-// tmp_reg / out_full / tmp_full respond.
-//
-// Build/run:
-//   iverilog -g2012 -o sim skidbuffer_dbg_tb.sv skidbuffer_dbg.sv && vvp sim
-//=====================================================================
+
 module skidbuffer_tb;
 
     localparam int WIDTH = 8;
