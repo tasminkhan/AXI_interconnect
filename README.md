@@ -1,17 +1,9 @@
 # AXI-interconnect
 
-Skid buffer implemented for now. This repo will track ongoing changes — more RTL and
-waveform images will be added over time.
+Skid buffer and an AXI slave with a write engine and AW FIFO implemented for now.
+This repo will track ongoing changes — more RTL will be added over time.
 
 ## Structure
 
-- `src/` — SystemVerilog source (`.sv`) files
-- `image/` — waveform / debug images (`.png`)
-
-## Current contents
-
-| File | Description |
-|------|-------------|
-| `src/skidbuffer.sv` | Skid buffer RTL |
-| `src/testbench.sv` | Testbench for the skid buffer |
-| `image/dbg_skidbuffer.png` | Debug waveform capture |
+- `src/` — SystemVerilog source (`.sv`, `.svh`) files
+- `doc/` — design notes

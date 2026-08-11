@@ -25,18 +25,19 @@ module skidbuffer #(
     assign out_data  = out_reg;
     assign out_valid = out_full;
 
+    // Ready NEXT cycle if downstream is draining now, or the skid slot will still be free.
+    // (Standard register-slice early-ready form;
+    // never a function of in_valid alone in a way that creates a
+    // valid->ready combinational loop - in_ready itself is registered.)
+    wire in_ready_early = out_ready | (~tmp_full & (~out_full | ~in_valid));
+    
     // ---- drive the debug ports from the internal state ----
     assign dbg_out_reg        = out_reg;
     assign dbg_tmp_reg        = tmp_reg;
     assign dbg_out_full       = out_full;
     assign dbg_tmp_full       = tmp_full;
     assign dbg_in_ready_early = in_ready_early;
-
-    // Ready NEXT cycle if downstream is draining now, or the skid slot will still be free.
-    // (Standard register-slice early-ready form;
-    // never a function of in_valid alone in a way that creates a
-    // valid->ready combinational loop - in_ready itself is registered.)
-    wire in_ready_early = out_ready | (~tmp_full & (~out_full | ~in_valid));
+    
     always_ff @(posedge clk) begin
         if (!rst_n) begin
             in_ready <= 1'b0;
