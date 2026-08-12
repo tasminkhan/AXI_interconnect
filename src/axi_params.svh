@@ -17,7 +17,7 @@ localparam int SLAVE_REG_COUNT  = 16;   // registers per slave
 //------------------ derived ---------------------------------
 localparam int SLAVE_PTR_WIDTH  = $clog2(SLAVE_FIFO_DEPTH) + 1;  // 3 (wrap bit)
 localparam int BEAT_COUNT_WIDTH = LEN_WIDTH;                     // 4
-localparam int ADDR_STEP        = DATA_WIDTH/8;                  // 2 bytes per beat (AxSIZE omitted)
+localparam int ADDR_STEP        = DATA_WIDTH/8;                  // 2 bytes per beat 
 localparam int REG_IDX_WIDTH    = $clog2(SLAVE_REG_COUNT);       // 4
 
 //------------------ response encodings ----------------------

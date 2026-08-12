@@ -27,7 +27,17 @@ module slave #(
     output logic [3:0]  BID_O,
     output logic [1:0]  BRESP_O,
     output logic        BVALID_O,
-    input  logic        BREADY_I
+    input  logic        BREADY_I,
+    
+    //---------------- DEBUG: one port per register ----
+    output logic [15:0] dbg_reg0,  output logic [15:0] dbg_reg1,
+    output logic [15:0] dbg_reg2,  output logic [15:0] dbg_reg3,
+    output logic [15:0] dbg_reg4,  output logic [15:0] dbg_reg5,
+    output logic [15:0] dbg_reg6,  output logic [15:0] dbg_reg7,
+    output logic [15:0] dbg_reg8,  output logic [15:0] dbg_reg9,
+    output logic [15:0] dbg_reg10, output logic [15:0] dbg_reg11,
+    output logic [15:0] dbg_reg12, output logic [15:0] dbg_reg13,
+    output logic [15:0] dbg_reg14, output logic [15:0] dbg_reg15
 );
 
     `include "axi_params.svh"
@@ -36,6 +46,15 @@ module slave #(
     // Register file : SLAVE_REG_COUNT x DATA_WIDTH, cleared on reset
     //-----------------------------------------------------------------
     logic [DATA_WIDTH-1:0] regs [0:SLAVE_REG_COUNT-1];
+    
+    assign dbg_reg0  = regs[0];   assign dbg_reg1  = regs[1];
+    assign dbg_reg2  = regs[2];   assign dbg_reg3  = regs[3];
+    assign dbg_reg4  = regs[4];   assign dbg_reg5  = regs[5];
+    assign dbg_reg6  = regs[6];   assign dbg_reg7  = regs[7];
+    assign dbg_reg8  = regs[8];   assign dbg_reg9  = regs[9];
+    assign dbg_reg10 = regs[10];  assign dbg_reg11 = regs[11];
+    assign dbg_reg12 = regs[12];  assign dbg_reg13 = regs[13];
+    assign dbg_reg14 = regs[14];  assign dbg_reg15 = regs[15];
 
     //=================================================================
     // AW FIFO : depth SLAVE_FIFO_DEPTH, {id, addr, len} per entry.
@@ -74,6 +93,15 @@ module slave #(
     logic [BEAT_COUNT_WIDTH-1:0] weng_len;  // popped AWLEN (beats-1)
     logic [BEAT_COUNT_WIDTH-1:0] weng_beat; // beat counter 0..len
 
+    //task to pop addresses 
+    task automatic pop;
+        weng_id    <= awf_id  [awf_rp[SLAVE_PTR_WIDTH-2:0]];
+        weng_idx   <= awf_addr[awf_rp[SLAVE_PTR_WIDTH-2:0]][4:1];
+        weng_len   <= awf_len [awf_rp[SLAVE_PTR_WIDTH-2:0]];
+        weng_beat  <= '0;
+        awf_rp     <= awf_rp + 1'b1;
+    endtask
+    
     // Moore outputs: WREADY only in W_BURST.
     assign WREADY_O = (weng_state == W_BURST);
 
@@ -98,13 +126,7 @@ module slave #(
                 //---------------------------------------------------
                 W_IDLE: begin
                     if (!awf_empty) begin
-                        weng_id   <= awf_id [awf_rp[SLAVE_PTR_WIDTH-2:0]];
-                        // index = (ADDR - BASE)/ADDR_STEP; bases are
-                        // 32-byte aligned so this is ADDR[4:1].
-                        weng_idx  <= awf_addr[awf_rp[SLAVE_PTR_WIDTH-2:0]][4:1];
-                        weng_len  <= awf_len[awf_rp[SLAVE_PTR_WIDTH-2:0]];
-                        weng_beat <= '0;
-                        awf_rp    <= awf_rp + 1'b1;
+                        pop();
                         weng_state <= W_BURST;
                     end
                 end
@@ -123,6 +145,12 @@ module slave #(
                             BID_O    <= weng_id;          // echo the transaction ID
                             BRESP_O  <= WLAST_I ? RESP_OKAY : RESP_SLVERR;
                             weng_state <= W_RESP;
+                        end else if (WLAST_I) begin       // WLAST early -> short burst
+                            // Master asserted LAST before the final beat.
+                            BVALID_O <= 1'b1;
+                            BID_O    <= weng_id;
+                            BRESP_O  <= RESP_SLVERR;
+                            weng_state <= W_RESP;
                         end
                     end
                 end
@@ -133,7 +161,11 @@ module slave #(
                 W_RESP: begin
                     if (BREADY_I) begin                   // BVALID_O & BREADY_I handshake
                         BVALID_O   <= 1'b0;
-                        weng_state <= W_IDLE;             // pop next queued address
+                        if (!awf_empty) begin
+                            pop();
+                            weng_state <= W_BURST;
+                        end else
+                            weng_state <= W_IDLE;             
                     end
                 end
                 default: weng_state <= W_IDLE;

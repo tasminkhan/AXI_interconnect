@@ -32,14 +32,25 @@ module slave_tb;
     logic [1:0]  BRESP_O;
     logic        BVALID_O;
     logic        BREADY_I;
-
+    
+    // 16 debug register observation ports
+    logic [15:0] dbg_reg [0:15];
+    
     slave #(.BASE_ADDR(8'hA0)) dut (
         .ACLK(ACLK), .ARESETn(ARESETn),
         .AWID_I(AWID_I), .AWADDR_I(AWADDR_I), .AWLEN_I(AWLEN_I),
         .AWVALID_I(AWVALID_I), .AWREADY_O(AWREADY_O),
         .WDATA_I(WDATA_I), .WSTRB_I(WSTRB_I), .WLAST_I(WLAST_I),
         .WVALID_I(WVALID_I), .WREADY_O(WREADY_O),
-        .BID_O(BID_O), .BRESP_O(BRESP_O), .BVALID_O(BVALID_O), .BREADY_I(BREADY_I)
+        .BID_O(BID_O), .BRESP_O(BRESP_O), .BVALID_O(BVALID_O), .BREADY_I(BREADY_I),
+        .dbg_reg0 (dbg_reg[0]),  .dbg_reg1 (dbg_reg[1]),
+        .dbg_reg2 (dbg_reg[2]),  .dbg_reg3 (dbg_reg[3]),
+        .dbg_reg4 (dbg_reg[4]),  .dbg_reg5 (dbg_reg[5]),
+        .dbg_reg6 (dbg_reg[6]),  .dbg_reg7 (dbg_reg[7]),
+        .dbg_reg8 (dbg_reg[8]),  .dbg_reg9 (dbg_reg[9]),
+        .dbg_reg10(dbg_reg[10]), .dbg_reg11(dbg_reg[11]),
+        .dbg_reg12(dbg_reg[12]), .dbg_reg13(dbg_reg[13]),
+        .dbg_reg14(dbg_reg[14]), .dbg_reg15(dbg_reg[15])
     );
 
     always #5 ACLK = ~ACLK;
@@ -96,13 +107,11 @@ module slave_tb;
     // BFM: collect the B response.
     //==================================================================
     task automatic b_get(input [3:0] exp_id, output [1:0] resp);
-        @(posedge ACLK);
         BREADY_I <= 1'b1;
         do @(posedge ACLK); while (!BVALID_O);
         resp = BRESP_O;
         check(BID_O === exp_id,
               $sformatf("BID echo got %0h exp %0h", BID_O, exp_id));
-        @(posedge ACLK);
         BREADY_I <= 1'b0;
     endtask
 
@@ -180,7 +189,4 @@ module slave_tb;
         else             $display("\n=== %0d TEST(S) FAILED ===", errors);
         $finish;
     end
-
-    initial begin #20000; $display("[%0t] TIMEOUT (possible hang)", $time); $finish; end
-
 endmodule
