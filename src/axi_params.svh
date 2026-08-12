@@ -23,3 +23,4 @@ localparam int REG_IDX_WIDTH    = $clog2(SLAVE_REG_COUNT);       // 4
 //------------------ response encodings ----------------------
 localparam logic [RESP_WIDTH-1:0] RESP_OKAY   = 2'b00;
 localparam logic [RESP_WIDTH-1:0] RESP_SLVERR = 2'b10;
+localparam logic [RESP_WIDTH-1:0] RESP_DECERR = 2'b11;

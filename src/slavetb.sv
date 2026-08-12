@@ -189,4 +189,11 @@ module slave_tb;
         else             $display("\n=== %0d TEST(S) FAILED ===", errors);
         $finish;
     end
+    
+    initial begin 
+        #20000; 
+        $display("[%0t] TIMEOUT (possible hang)", $time); 
+        $finish; 
+    end
+    
 endmodule
