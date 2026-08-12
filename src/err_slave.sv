@@ -34,30 +34,6 @@ module err_slave (
     `include "axi_params.svh"
 
     //=================================================================
-    // AW FIFO : depth SLAVE_FIFO_DEPTH, {id, len} per entry.
-    // (No addr stored - the error path never computes a register index.)
-    //=================================================================
-    logic [ID_WIDTH-1:0]        awf_id  [0:SLAVE_FIFO_DEPTH-1];
-    logic [LEN_WIDTH-1:0]       awf_len [0:SLAVE_FIFO_DEPTH-1];
-    logic [SLAVE_PTR_WIDTH-1:0] awf_wp, awf_rp;
-
-    wire awf_empty = (awf_wp == awf_rp);
-    wire awf_full  = (awf_wp[SLAVE_PTR_WIDTH-2:0] == awf_rp[SLAVE_PTR_WIDTH-2:0])
-                   & (awf_wp[SLAVE_PTR_WIDTH-1]   != awf_rp[SLAVE_PTR_WIDTH-1]);
-
-    assign AWREADY_O = ~awf_full;      // accept while there is queue space
-
-    always_ff @(posedge ACLK) begin
-        if (!ARESETn) begin
-            awf_wp <= '0;
-        end else if (AWVALID_I && AWREADY_O) begin   // AW handshake -> push
-            awf_id [awf_wp[SLAVE_PTR_WIDTH-2:0]] <= AWID_I;
-            awf_len[awf_wp[SLAVE_PTR_WIDTH-2:0]] <= AWLEN_I;
-            awf_wp <= awf_wp + 1'b1;
-        end
-    end
-
-    //=================================================================
     // ENGINE : EW_IDLE -> EW_BURST -> EW_RESP (no register writes)
     //=================================================================
     typedef enum logic [1:0] {EW_IDLE, EW_BURST, EW_RESP} estate_t;
@@ -69,7 +45,7 @@ module err_slave (
 
     // Capture the AW directly from the ports (no FIFO). Latches id/len,
     // zeroes the beat counter. Caller sets the state.
-    task automatic grab;
+    task automatic drain;
         weng_id   <= AWID_I;
         weng_len  <= AWLEN_I;
         weng_beat <= '0;
@@ -88,7 +64,7 @@ module err_slave (
         end else case (estate)
             EW_IDLE:
                 if (AWVALID_I && AWREADY_O) begin   // AW handshake -> capture
-                    grab();
+                    drain();
                     estate <= EW_BURST;
                 end
             EW_BURST:
