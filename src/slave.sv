@@ -2,59 +2,48 @@
 // (INCR, start and end inside the window), so the engine does not
 // re-check range. Register index = (ADDR - BASE)/2; because both
 // bases are 32-byte aligned this is now ADDR[4:1].
+import param_pkg::*;
 
 module slave #(
-    parameter logic [7:0] BASE_ADDR = 8'hA0   // documentation / index comment
+    parameter logic [ADDRESS_WIDTH-1:0] BASE_ADDR = SLAVE0_BASE
 )(
     input  logic        ACLK,
     input  logic        ARESETn,
 
     //---------------- AW channel (from demux) ------------------------
-    input  logic [3:0]  AWID_I,
-    input  logic [7:0]  AWADDR_I,
-    input  logic [3:0]  AWLEN_I,
-    input  logic        AWVALID_I,     // this slave's demuxed valid
-    output logic        AWREADY_O,     // = ~awf_full
+    input  logic [ID_WIDTH-1:0]        AWID_I,
+    input  logic [ADDRESS_WIDTH-1:0]   AWADDR_I,
+    input  logic [LEN_WIDTH-1:0]       AWLEN_I,
+    input  logic                       AWVALID_I,     // this slave's demuxed valid
+    output logic                       AWREADY_O,     // = ~awf_full
 
     //---------------- W channel (broadcast payload, demuxed valid) ---
-    input  logic [15:0] WDATA_I,
-    input  logic [1:0]  WSTRB_I,
-    input  logic        WLAST_I,
-    input  logic        WVALID_I,
-    output logic        WREADY_O,      // = (engine in W_BURST)
+    input  logic [DATA_WIDTH-1:0]      WDATA_I,
+    input  logic [STROBE_WIDTH-1:0]    WSTRB_I,
+    input  logic                       WLAST_I,
+    input  logic                       WVALID_I,
+    output logic                       WREADY_O,     // = (engine in W_BURST)
 
     //---------------- B channel (to response mux) --------------------
-    output logic [3:0]  BID_O,
-    output logic [1:0]  BRESP_O,
-    output logic        BVALID_O,
-    input  logic        BREADY_I,
+    output logic [ID_WIDTH-1:0]        BID_O,
+    output logic [RESP_WIDTH-1:0]      BRESP_O,
+    output logic                       BVALID_O,
+    input  logic                       BREADY_I,
     
     //---------------- DEBUG: one port per register ----
-    output logic [15:0] dbg_reg0,  output logic [15:0] dbg_reg1,
-    output logic [15:0] dbg_reg2,  output logic [15:0] dbg_reg3,
-    output logic [15:0] dbg_reg4,  output logic [15:0] dbg_reg5,
-    output logic [15:0] dbg_reg6,  output logic [15:0] dbg_reg7,
-    output logic [15:0] dbg_reg8,  output logic [15:0] dbg_reg9,
-    output logic [15:0] dbg_reg10, output logic [15:0] dbg_reg11,
-    output logic [15:0] dbg_reg12, output logic [15:0] dbg_reg13,
-    output logic [15:0] dbg_reg14, output logic [15:0] dbg_reg15
+    output logic [SLAVE_REG_COUNT*DATA_WIDTH-1:0] dbg_regs
 );
-
-    `include "axi_params.svh"
-
     //-----------------------------------------------------------------
     // Register file : SLAVE_REG_COUNT x DATA_WIDTH, cleared on reset
     //-----------------------------------------------------------------
     logic [DATA_WIDTH-1:0] regs [0:SLAVE_REG_COUNT-1];
     
-    assign dbg_reg0  = regs[0];   assign dbg_reg1  = regs[1];
-    assign dbg_reg2  = regs[2];   assign dbg_reg3  = regs[3];
-    assign dbg_reg4  = regs[4];   assign dbg_reg5  = regs[5];
-    assign dbg_reg6  = regs[6];   assign dbg_reg7  = regs[7];
-    assign dbg_reg8  = regs[8];   assign dbg_reg9  = regs[9];
-    assign dbg_reg10 = regs[10];  assign dbg_reg11 = regs[11];
-    assign dbg_reg12 = regs[12];  assign dbg_reg13 = regs[13];
-    assign dbg_reg14 = regs[14];  assign dbg_reg15 = regs[15];
+    genvar g;
+    generate
+        for (g = 0; g < SLAVE_REG_COUNT; g++) begin : g_dbg
+            assign dbg_regs[g*DATA_WIDTH +: DATA_WIDTH] = regs[g];
+        end
+    endgenerate
 
     //=================================================================
     // AW FIFO : depth SLAVE_FIFO_DEPTH, {id, addr, len} per entry.
@@ -88,10 +77,10 @@ module slave #(
     typedef enum logic [1:0] {W_IDLE, W_BURST, W_RESP} weng_state_t;
     weng_state_t weng_state;
 
-    logic [ID_WIDTH-1:0]        weng_id;    // popped AWID -> BID echo
-    logic [REG_IDX_WIDTH-1:0]   weng_idx;   // current register index (steps +1/beat)
-    logic [BEAT_COUNT_WIDTH-1:0] weng_len;  // popped AWLEN (beats-1)
-    logic [BEAT_COUNT_WIDTH-1:0] weng_beat; // beat counter 0..len
+    logic [ID_WIDTH-1:0]                      weng_id;    // popped AWID -> BID echo
+    logic [($clog2(SLAVE_REG_COUNT))-1:0]     weng_idx;   // current register index (steps +1/beat)
+    logic [BEAT_COUNT_WIDTH-1:0]              weng_len;  // popped AWLEN (beats-1)
+    logic [BEAT_COUNT_WIDTH-1:0]              weng_beat; // beat counter 0..len
 
     //task to pop addresses 
     task automatic pop;
@@ -136,8 +125,9 @@ module slave #(
                 //---------------------------------------------------
                 W_BURST: begin
                     if (WVALID_I && WREADY_O) begin
-                        if (WSTRB_I[0]) regs[weng_idx][7:0]  <= WDATA_I[7:0];
-                        if (WSTRB_I[1]) regs[weng_idx][15:8] <= WDATA_I[15:8];
+                        for (int b = 0; b < STROBE_WIDTH; b++)
+                            if (WSTRB_I[b])
+                                regs[weng_idx][b*8 +: 8] <= WDATA_I[b*8 +: 8];
                         weng_idx  <= weng_idx + 1'b1;     // +ADDR_STEP bytes = next reg
                         weng_beat <= weng_beat + 1'b1;
                         if (weng_beat == weng_len) begin                

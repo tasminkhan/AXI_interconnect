@@ -43,6 +43,8 @@ module skidbuffer #(
             in_ready <= 1'b0;
             out_full <= 1'b0;
             tmp_full <= 1'b0;
+            out_reg  <= 0;
+            tmp_reg <= 0;
         end else begin
             in_ready <= in_ready_early;
             if (in_ready) begin

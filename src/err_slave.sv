@@ -8,30 +8,29 @@
 // transferred (WREADY high through the whole burst). Termination is
 // COUNTER-authoritative (weng_beat == weng_len), so a missing WLAST
 // can never hang it - matching the real slave.
+import param_pkg::*;
 
 module err_slave (
     input  logic        ACLK,
     input  logic        ARESETn,
 
     //---------------- AW channel (from demux, sel = SEL_ERR) ---------
-    input  logic [3:0]  AWID_I,
-    input  logic [3:0]  AWLEN_I,
-    input  logic        AWVALID_I,
-    output logic        AWREADY_O,
+    input  logic [ID_WIDTH-1:0]      AWID_I,
+    input  logic [LEN_WIDTH-1:0]     AWLEN_I,
+    input  logic                     AWVALID_I,
+    output logic                     AWREADY_O,
 
     //---------------- W channel --------------------------------------
-    input  logic        WLAST_I,
-    input  logic        WVALID_I,
-    output logic        WREADY_O,
+    input  logic                     WLAST_I,
+    input  logic                     WVALID_I,
+    output logic                     WREADY_O,
 
     //---------------- B channel (to response mux) --------------------
-    output logic [3:0]  BID_O,
-    output logic [1:0]  BRESP_O,
-    output logic        BVALID_O,
-    input  logic        BREADY_I
+    output logic [ID_WIDTH-1:0]      BID_O,
+    output logic [RESP_WIDTH-1:0]    BRESP_O,
+    output logic                     BVALID_O,
+    input  logic                     BREADY_I
 );
-
-    `include "axi_params.svh"
 
     //=================================================================
     // ENGINE : EW_IDLE -> EW_BURST -> EW_RESP (no register writes)
