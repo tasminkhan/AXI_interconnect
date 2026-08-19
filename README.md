@@ -3,7 +3,7 @@
 A synthesizable AXI4 **write-path** interconnect in SystemVerilog: one master
 port, two register slaves, and a decode-error responder.
 
-This repo tracks ongoing work — the read path (AR/R) and multi-master support
+This repo tracks ongoing work. The read path (AR/R) and multi-master support
 are planned.
 
 ## What's implemented
