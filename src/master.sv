@@ -64,8 +64,8 @@ module master (
         .in_valid  (AWVALID),
         .in_ready  (AWREADY),        // what the testbench handshakes against
         .out_data  (aw_pack_out),
-        .out_valid (AWVALID_SKD),
-        .out_ready (AWREADY_SKD)
+        .out_valid (AWVALID_DMUX),
+        .out_ready (AWREADY_MUX)
     );
 
     //-----------------------------------------------------------------
@@ -82,8 +82,8 @@ module master (
         .in_valid  (WVALID),
         .in_ready  (WREADY),
         .out_data  (w_pack_out),
-        .out_valid (WVALID_SKD),
-        .out_ready (WREADY_SKD)
+        .out_valid (WVALID_DMUX),
+        .out_ready (WREADY_MUX)
     );
 
     //-----------------------------------------------------------------
@@ -100,7 +100,7 @@ module master (
         .rst_n     (ARESETn),
         .in_data   (b_pack_in),
         .in_valid  (BVALID_MUX),
-        .in_ready  (BREADY_MUX),     // fabric-side ready; select-FIFO pops on this handshake
+        .in_ready  (BREADY_DMUX),     // fabric-side ready; select-FIFO pops on this handshake
         .out_data  (b_pack_out),
         .out_valid (BVALID),
         .out_ready (BREADY)
