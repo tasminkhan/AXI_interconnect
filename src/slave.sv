@@ -30,6 +30,21 @@ module slave #(
     output logic                       BVALID_O,
     input  logic                       BREADY_I,
     
+    //---------------- AR channel (from demux) ------------------------
+    input  logic [ID_WIDTH-1:0]        ARID_I,
+    input  logic [ADDRESS_WIDTH-1:0]   ARADDR_I,
+    input  logic [LEN_WIDTH-1:0]       ARLEN_I,
+    input  logic                       ARVALID_I,
+    output logic                       ARREADY_O,
+
+    //---------------- R channel (to read response mux) ---------------
+    output logic [ID_WIDTH-1:0]        RID_O,
+    output logic [DATA_WIDTH-1:0]      RDATA_O,
+    output logic [RESP_WIDTH-1:0]      RRESP_O,
+    output logic                       RLAST_O,
+    output logic                       RVALID_O,
+    input  logic                       RREADY_I,
+    
     //---------------- DEBUG: one port per register ----
     output logic [SLAVE_REG_COUNT*DATA_WIDTH-1:0] dbg_regs
 );
@@ -163,4 +178,84 @@ module slave #(
         end
     end
 
+    //=================================================================
+    // AR FIFO : depth SLAVE_FIFO_DEPTH, {id, addr, len} per entry.
+    // Symmetric to the AW FIFO. Multi-outstanding reads.
+    //=================================================================
+    logic [ID_WIDTH-1:0]        arf_id   [0:SLAVE_FIFO_DEPTH-1];
+    logic [ADDRESS_WIDTH-1:0]   arf_addr [0:SLAVE_FIFO_DEPTH-1];
+    logic [LEN_WIDTH-1:0]       arf_len  [0:SLAVE_FIFO_DEPTH-1];
+    logic [SLAVE_PTR_WIDTH-1:0] arf_wp, arf_rp;
+
+    wire arf_empty = (arf_wp == arf_rp);
+    wire arf_full  = (arf_wp[SLAVE_PTR_WIDTH-2:0] == arf_rp[SLAVE_PTR_WIDTH-2:0])
+                   & (arf_wp[SLAVE_PTR_WIDTH-1]   != arf_rp[SLAVE_PTR_WIDTH-1]);
+
+    assign ARREADY_O = ~arf_full;
+
+    always_ff @(posedge ACLK) begin
+        if (!ARESETn) begin
+            arf_wp <= '0;
+        end else if (ARVALID_I && ARREADY_O) begin
+            arf_id  [arf_wp[SLAVE_PTR_WIDTH-2:0]] <= ARID_I;
+            arf_addr[arf_wp[SLAVE_PTR_WIDTH-2:0]] <= ARADDR_I;
+            arf_len [arf_wp[SLAVE_PTR_WIDTH-2:0]] <= ARLEN_I;
+            arf_wp <= arf_wp + 1'b1;
+        end
+    end
+    
+    //=================================================================
+    // READ ENGINE : R_IDLE -> R_BURST. RDATA comes from the same
+    // register file the writes target, so a read reflects prior writes.
+    // Counter-authoritative: emits ARLEN+1 beats, RLAST on the last.
+    //=================================================================
+    typedef enum logic {R_IDLE, R_BURST} reng_state_t;
+    reng_state_t reng_state;
+
+    logic [ID_WIDTH-1:0]                  reng_id;
+    logic [($clog2(SLAVE_REG_COUNT))-1:0] reng_idx;
+    logic [BEAT_COUNT_WIDTH-1:0]          reng_len, reng_beat;
+
+    task automatic rpop;
+        reng_id   <= arf_id  [arf_rp[SLAVE_PTR_WIDTH-2:0]];
+        reng_idx  <= arf_addr[arf_rp[SLAVE_PTR_WIDTH-2:0]][4:1];
+        reng_len  <= arf_len [arf_rp[SLAVE_PTR_WIDTH-2:0]];
+        reng_beat <= '0;
+        arf_rp    <= arf_rp + 1'b1;
+    endtask
+
+    // outputs driven from state + current index.
+    assign RVALID_O = (reng_state == R_BURST);
+    assign RID_O    = reng_id;
+    assign RDATA_O  = regs[reng_idx];
+    assign RRESP_O  = RESP_OKAY;
+    assign RLAST_O  = (reng_state == R_BURST) && (reng_beat == reng_len);
+
+    always_ff @(posedge ACLK) begin
+        if (!ARESETn) begin
+            reng_state <= R_IDLE;
+            arf_rp     <= '0;
+            reng_id    <= '0;
+            reng_idx   <= '0;
+            reng_len   <= '0;
+            reng_beat  <= '0;
+        end else case (reng_state)
+            R_IDLE:
+                if (!arf_empty) begin
+                    rpop();
+                    reng_state <= R_BURST;
+                end
+            R_BURST:
+                if (RVALID_O && RREADY_I) begin       // beat accepted
+                    if (reng_beat == reng_len) begin  // last beat done
+                        if (!arf_empty) rpop();       // back-to-back
+                            else reng_state <= R_IDLE;
+                    end else begin
+                        reng_idx  <= reng_idx + 1'b1;
+                        reng_beat <= reng_beat + 1'b1;
+                    end
+                end
+        endcase
+    end
+    
 endmodule

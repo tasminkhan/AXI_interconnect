@@ -47,7 +47,39 @@ module master (
     output logic [ID_WIDTH-1:0]       BID,
     output logic [RESP_WIDTH-1:0]     BRESP,
     output logic                      BVALID,
-    input  logic                      BREADY
+    input  logic                      BREADY,
+
+    //================ AR channel : testbench side =====================
+    input  logic [ID_WIDTH-1:0]       ARID,
+    input  logic [ADDRESS_WIDTH-1:0]  ARADDR,
+    input  logic [LEN_WIDTH-1:0]      ARLEN,
+    input  logic [BURST_WIDTH-1:0]    ARBURST,
+    input  logic                      ARVALID,
+    output logic                      ARREADY,
+
+    //================ AR channel : fabric side ========================
+    output logic [ID_WIDTH-1:0]       ARID_SKD,
+    output logic [ADDRESS_WIDTH-1:0]  ARADDR_SKD,
+    output logic [LEN_WIDTH-1:0]      ARLEN_SKD,
+    output logic [BURST_WIDTH-1:0]    ARBURST_SKD,
+    output logic                      ARVALID_DMUX,
+    input  logic                      ARREADY_MUX,
+
+    //================ R channel : fabric side (from read mux) =========
+    input  logic [ID_WIDTH-1:0]       RID_MUX,
+    input  logic [DATA_WIDTH-1:0]     RDATA_MUX,
+    input  logic [RESP_WIDTH-1:0]     RRESP_MUX,
+    input  logic                      RLAST_MUX,
+    input  logic                      RVALID_MUX,
+    output logic                      RREADY_DMUX,
+
+    //================ R channel : testbench side ======================
+    output logic [ID_WIDTH-1:0]       RID,
+    output logic [DATA_WIDTH-1:0]     RDATA,
+    output logic [RESP_WIDTH-1:0]     RRESP,
+    output logic                      RLAST,
+    output logic                      RVALID,
+    input  logic                      RREADY
 );
 
     //-----------------------------------------------------------------
@@ -104,6 +136,33 @@ module master (
         .out_data  (b_pack_out),
         .out_valid (BVALID),
         .out_ready (BREADY)
+    );
+    
+    //-----------------------------------------------------------------
+    // AR skid buffer : pack {ID, ADDR, LEN, BURST} (same width as AW)
+    //-----------------------------------------------------------------
+    logic [AW_PAYLOAD_WIDTH-1:0] ar_pack_in, ar_pack_out;
+    assign ar_pack_in = {ARID, ARADDR, ARLEN, ARBURST};
+    assign {ARID_SKD, ARADDR_SKD, ARLEN_SKD, ARBURST_SKD} = ar_pack_out;
+
+    skidbuffer #(.WIDTH(AW_PAYLOAD_WIDTH)) u_ar_skid (
+        .clk(ACLK), .rst_n(ARESETn),
+        .in_data(ar_pack_in), .in_valid(ARVALID), .in_ready(ARREADY),
+        .out_data(ar_pack_out), .out_valid(ARVALID_DMUX), .out_ready(ARREADY_MUX)
+    );
+
+    //-----------------------------------------------------------------
+    // R skid buffer : return direction. Pack {ID, DATA, RESP, LAST}
+    //-----------------------------------------------------------------
+    localparam int R_PAYLOAD_WIDTH = ID_WIDTH + DATA_WIDTH + RESP_WIDTH + 1;
+    logic [R_PAYLOAD_WIDTH-1:0] r_pack_in, r_pack_out;
+    assign r_pack_in = {RID_MUX, RDATA_MUX, RRESP_MUX, RLAST_MUX};
+    assign {RID, RDATA, RRESP, RLAST} = r_pack_out;
+
+    skidbuffer #(.WIDTH(R_PAYLOAD_WIDTH)) u_r_skid (
+        .clk(ACLK), .rst_n(ARESETn),
+        .in_data(r_pack_in), .in_valid(RVALID_MUX), .in_ready(RREADY_DMUX),
+        .out_data(r_pack_out), .out_valid(RVALID), .out_ready(RREADY)
     );
 
 endmodule

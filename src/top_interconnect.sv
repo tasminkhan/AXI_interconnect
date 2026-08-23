@@ -33,7 +33,23 @@ module top (
     output logic [ID_WIDTH-1:0]       BID,
     output logic [RESP_WIDTH-1:0]     BRESP,
     output logic                      BVALID,
-    input  logic                      BREADY
+    input  logic                      BREADY,
+
+    //---------------- AR channel -------------------------------------
+    input  logic [ID_WIDTH-1:0]       ARID,
+    input  logic [ADDRESS_WIDTH-1:0]  ARADDR,
+    input  logic [LEN_WIDTH-1:0]      ARLEN,
+    input  logic [BURST_WIDTH-1:0]    ARBURST,
+    input  logic                      ARVALID,
+    output logic                      ARREADY,
+
+    //---------------- R channel --------------------------------------
+    output logic [ID_WIDTH-1:0]       RID,
+    output logic [DATA_WIDTH-1:0]     RDATA,
+    output logic [RESP_WIDTH-1:0]     RRESP,
+    output logic                      RLAST,
+    output logic                      RVALID,
+    input  logic                      RREADY
 );
 
     //=================================================================
@@ -64,6 +80,26 @@ module top (
     logic [ID_WIDTH-1:0]   BID_MUX;
     logic [RESP_WIDTH-1:0] BRESP_MUX;
     logic                  BVALID_MUX, BREADY_DMUX;
+    
+    logic [ID_WIDTH-1:0]      ARID_SKD;
+    logic [ADDRESS_WIDTH-1:0] ARADDR_SKD;
+    logic [LEN_WIDTH-1:0]     ARLEN_SKD;
+    logic [BURST_WIDTH-1:0]   ARBURST_SKD;
+    logic ARVALID_S0, ARVALID_S1, ARVALID_ERR;
+    logic ARREADY_S0, ARREADY_S1, ARREADY_ERR;
+    logic ARVALID_DMUX, ARREADY_MUX;
+
+    logic [ID_WIDTH-1:0]   RID_S0, RID_S1, RID_ERR;
+    logic [DATA_WIDTH-1:0] RDATA_S0, RDATA_S1, RDATA_ERR;
+    logic [RESP_WIDTH-1:0] RRESP_S0, RRESP_S1, RRESP_ERR;
+    logic RLAST_S0, RLAST_S1, RLAST_ERR;
+    logic RVALID_S0, RVALID_S1, RVALID_ERR;
+    logic RREADY_S0, RREADY_S1, RREADY_ERR;
+
+    logic [ID_WIDTH-1:0]   RID_MUX;
+    logic [DATA_WIDTH-1:0] RDATA_MUX;
+    logic [RESP_WIDTH-1:0] RRESP_MUX;
+    logic RLAST_MUX, RVALID_MUX, RREADY_DMUX;
 
     //=================================================================
     // DECODER (combinational) - target select + burst pre-check.
@@ -169,7 +205,51 @@ module top (
         .BID_MUX(BID_MUX), .BRESP_MUX(BRESP_MUX),
         .BVALID_MUX(BVALID_MUX), .BREADY_DMUX(BREADY_DMUX)
     );
+    
+    //=================================================================
+    // AR DECODER (combinational) - target select + burst pre-check.
+    //=================================================================
+    logic [SELECT_WIDTH-1:0] ar_sel;
 
+    ar_decoder u_ardecoder (
+        .ARADDR_SKD  (ARADDR_SKD),
+        .ARLEN_SKD   (ARLEN_SKD),
+        .ARBURST_SKD (ARBURST_SKD),
+        .ar_sel      (ar_sel)
+    );
+
+    //=================================================================
+    // AR DEMUX (live decode) : payload broadcast, VALID steered.
+    // R routes itself by RID through the arbiter; 
+    // each slave's AR FIFO backpressures via ARREADY.
+    //=================================================================
+    always_comb begin
+        ARVALID_S0  = ARVALID_DMUX & (ar_sel == SEL_S0);
+        ARVALID_S1  = ARVALID_DMUX & (ar_sel == SEL_S1);
+        ARVALID_ERR = ARVALID_DMUX & (ar_sel == SEL_ERR);
+
+        case (ar_sel)
+            SEL_S0:  ARREADY_MUX = ARREADY_S0;
+            SEL_S1:  ARREADY_MUX = ARREADY_S1;
+            default: ARREADY_MUX = ARREADY_ERR;
+        endcase
+    end
+
+    //=================================================================
+    // R ARBITER + MUX (round-robin, burst-locked to RLAST)
+    //=================================================================
+    r_arbiter u_r_arbiter (
+        .ACLK(ACLK), .ARESETn(ARESETn),
+        .RID_S0(RID_S0),     .RID_S1(RID_S1),     .RID_ERR(RID_ERR),
+        .RDATA_S0(RDATA_S0), .RDATA_S1(RDATA_S1), .RDATA_ERR(RDATA_ERR),
+        .RRESP_S0(RRESP_S0), .RRESP_S1(RRESP_S1), .RRESP_ERR(RRESP_ERR),
+        .RLAST_S0(RLAST_S0), .RLAST_S1(RLAST_S1), .RLAST_ERR(RLAST_ERR),
+        .RVALID_S0(RVALID_S0), .RVALID_S1(RVALID_S1), .RVALID_ERR(RVALID_ERR),
+        .RREADY_S0(RREADY_S0), .RREADY_S1(RREADY_S1), .RREADY_ERR(RREADY_ERR),
+        .RID_MUX(RID_MUX), .RDATA_MUX(RDATA_MUX), .RRESP_MUX(RRESP_MUX),
+        .RLAST_MUX(RLAST_MUX), .RVALID_MUX(RVALID_MUX), .RREADY_DMUX(RREADY_DMUX)
+    );
+    
     //=================================================================
     // Master : the three always-on skid buffers
     //=================================================================
@@ -192,7 +272,18 @@ module top (
         .BID_MUX(BID_MUX), .BRESP_MUX(BRESP_MUX),
         .BVALID_MUX(BVALID_MUX), .BREADY_DMUX(BREADY_DMUX),
 
-        .BID(BID), .BRESP(BRESP), .BVALID(BVALID), .BREADY(BREADY)
+        .BID(BID), .BRESP(BRESP), .BVALID(BVALID), .BREADY(BREADY),
+        
+        .ARID(ARID), .ARADDR(ARADDR), .ARLEN(ARLEN), .ARBURST(ARBURST),
+        .ARVALID(ARVALID), .ARREADY(ARREADY),
+        .ARID_SKD(ARID_SKD), .ARADDR_SKD(ARADDR_SKD),
+        .ARLEN_SKD(ARLEN_SKD), .ARBURST_SKD(ARBURST_SKD),
+        .ARVALID_DMUX(ARVALID_DMUX), .ARREADY_MUX(ARREADY_MUX),
+
+        .RID_MUX(RID_MUX), .RDATA_MUX(RDATA_MUX), .RRESP_MUX(RRESP_MUX),
+        .RLAST_MUX(RLAST_MUX), .RVALID_MUX(RVALID_MUX), .RREADY_DMUX(RREADY_DMUX),
+        .RID(RID), .RDATA(RDATA), .RRESP(RRESP),
+        .RLAST(RLAST), .RVALID(RVALID), .RREADY(RREADY)
     );
 
     //=================================================================
@@ -205,7 +296,11 @@ module top (
         .WDATA_I(WDATA_SKD), .WSTRB_I(WSTRB_SKD), .WLAST_I(WLAST_SKD),
         .WVALID_I(WVALID_S0), .WREADY_O(WREADY_S0),
         .BID_O(BID_S0), .BRESP_O(BRESP_S0),
-        .BVALID_O(BVALID_S0), .BREADY_I(BREADY_S0)
+        .BVALID_O(BVALID_S0), .BREADY_I(BREADY_S0),
+        .ARID_I(ARID_SKD), .ARADDR_I(ARADDR_SKD), .ARLEN_I(ARLEN_SKD),
+        .ARVALID_I(ARVALID_S0), .ARREADY_O(ARREADY_S0),
+        .RID_O(RID_S0), .RDATA_O(RDATA_S0), .RRESP_O(RRESP_S0),
+        .RLAST_O(RLAST_S0), .RVALID_O(RVALID_S0), .RREADY_I(RREADY_S0)
     );
 
     slave #(.BASE_ADDR(SLAVE1_BASE)) u_slave1 (
@@ -215,7 +310,11 @@ module top (
         .WDATA_I(WDATA_SKD), .WSTRB_I(WSTRB_SKD), .WLAST_I(WLAST_SKD),
         .WVALID_I(WVALID_S1), .WREADY_O(WREADY_S1),
         .BID_O(BID_S1), .BRESP_O(BRESP_S1),
-        .BVALID_O(BVALID_S1), .BREADY_I(BREADY_S1)
+        .BVALID_O(BVALID_S1), .BREADY_I(BREADY_S1),
+        .ARID_I(ARID_SKD), .ARADDR_I(ARADDR_SKD), .ARLEN_I(ARLEN_SKD),
+        .ARVALID_I(ARVALID_S1), .ARREADY_O(ARREADY_S1),
+        .RID_O(RID_S1), .RDATA_O(RDATA_S1), .RRESP_O(RRESP_S1),
+        .RLAST_O(RLAST_S1), .RVALID_O(RVALID_S1), .RREADY_I(RREADY_S1)
     );
 
     //=================================================================
@@ -228,7 +327,11 @@ module top (
         .WLAST_I(WLAST_SKD),
         .WVALID_I(WVALID_ERR), .WREADY_O(WREADY_ERR),
         .BID_O(BID_ERR), .BRESP_O(BRESP_ERR),
-        .BVALID_O(BVALID_ERR), .BREADY_I(BREADY_ERR)
+        .BVALID_O(BVALID_ERR), .BREADY_I(BREADY_ERR),
+        .ARID_I(ARID_SKD), .ARLEN_I(ARLEN_SKD),
+        .ARVALID_I(ARVALID_ERR), .ARREADY_O(ARREADY_ERR),
+        .RID_O(RID_ERR), .RDATA_O(RDATA_ERR), .RRESP_O(RRESP_ERR),
+        .RLAST_O(RLAST_ERR), .RVALID_O(RVALID_ERR), .RREADY_I(RREADY_ERR)
     );
 
 endmodule

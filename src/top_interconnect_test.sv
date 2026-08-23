@@ -20,6 +20,19 @@ module top_tb;
     logic [RESP_WIDTH-1:0]    BRESP;
     logic                     BVALID, BREADY;
 
+    logic [ID_WIDTH-1:0]      ARID;
+    logic [ADDRESS_WIDTH-1:0] ARADDR;
+    logic [LEN_WIDTH-1:0]     ARLEN;
+    logic [BURST_WIDTH-1:0]   ARBURST;
+    logic                     ARVALID, ARREADY;
+
+    logic [ID_WIDTH-1:0]      RID;
+    logic [DATA_WIDTH-1:0]    RDATA;
+    logic [RESP_WIDTH-1:0]    RRESP;
+    logic                     RLAST, RVALID, RREADY;
+
+    logic [DATA_WIDTH-1:0]    rbeats [0:15];   // capture buffer for R beats
+
     top dut (.*);
 
     int pass_count = 0, fail_count = 0;
@@ -79,6 +92,31 @@ module top_tb;
         BREADY <= 1'b0;
     endtask
 
+    task automatic ar_send(input [ID_WIDTH-1:0] id,
+                           input [ADDRESS_WIDTH-1:0] addr,
+                           input [LEN_WIDTH-1:0] len,
+                           input [BURST_WIDTH-1:0] burst = BURST_INCR);
+        ARID <= id; ARADDR <= addr; ARLEN <= len; ARBURST <= burst;
+        ARVALID <= 1'b1;
+        do @(posedge ACLK); while (!(ARVALID && ARREADY));
+        ARVALID <= 1'b0;
+    endtask
+
+    // Collect nbeats R beats into rbeats[], return last id/resp, and
+    // check RLAST lands exactly on the final beat (burst-lock correctness).
+    task automatic r_get(input int nbeats,
+                         output logic [ID_WIDTH-1:0] id,
+                         output logic [RESP_WIDTH-1:0] resp);
+        RREADY <= 1'b1;
+        for (int i = 0; i < nbeats; i++) begin
+            do @(posedge ACLK); while (!(RVALID && RREADY));
+            rbeats[i] = RDATA; id = RID; resp = RRESP;
+            check(RLAST === (i == nbeats-1),
+                  $sformatf("R RLAST beat %0d of %0d", i, nbeats-1));
+        end
+        RREADY <= 1'b0;
+    endtask
+
     // one complete single-beat write
     task automatic write1(input [ID_WIDTH-1:0] id,
                           input [ADDRESS_WIDTH-1:0] addr,
@@ -100,6 +138,8 @@ module top_tb;
 
         AWID<='0; AWADDR<='0; AWLEN<='0; AWBURST<=BURST_INCR; AWVALID<=1'b0;
         WDATA<='0; WSTRB<='1; WLAST<=1'b0; WVALID<=1'b0; BREADY<=1'b0;
+        ARID<='0; ARADDR<='0; ARLEN<='0; ARBURST<=BURST_INCR; ARVALID<=1'b0;
+        RREADY<=1'b0;
         ARESETn <= 1'b0;
         repeat (3) @(posedge ACLK);
         ARESETn <= 1'b1;
@@ -188,6 +228,39 @@ module top_tb;
         check(gid === 4'hE,            "T8 BID echoed on mismatch");
         check(gresp === RESP_SLVERR,   "T8 missing WLAST -> SLVERR (no hang)");
 
+        $display("\n===== T10: single-beat read-back from slave0 =====");
+        write1(4'h1, SLAVE0_BASE, 16'h1234, gresp);      // reg0 <- 1234
+        ar_send(4'h1, SLAVE0_BASE, 4'd0);
+        r_get(1, gid, gresp);
+        check(gid === 4'h1,           "T10 RID echoes ARID");
+        check(gresp === RESP_OKAY,    "T10 RRESP OKAY");
+        check(rbeats[0] === 16'h1234, "T10 RDATA reads back the write");
+
+        $display("\n===== T11: 4-beat burst read from slave0 =====");
+        aw_send(4'h2, SLAVE0_BASE + 8'd8, 4'd3);          // regs 4..7
+        w_send(4, 16'hA000);
+        b_get(gid, gresp);
+        ar_send(4'h2, SLAVE0_BASE + 8'd8, 4'd3);
+        r_get(4, gid, gresp);
+        check(gid === 4'h2,        "T11 RID echoed on burst read");
+        check(gresp === RESP_OKAY, "T11 burst read OKAY");
+        check(rbeats[0]===16'hA000 && rbeats[1]===16'hA001 &&
+              rbeats[2]===16'hA002 && rbeats[3]===16'hA003,
+              "T11 all four beats correct");
+
+        $display("\n===== T12: read from slave1 (RID routing) =====");
+        write1(4'h3, SLAVE1_BASE + 8'd4, 16'h55AA, gresp); // slave1 reg2
+        ar_send(4'h3, SLAVE1_BASE + 8'd4, 4'd0);
+        r_get(1, gid, gresp);
+        check(gid === 4'h3,           "T12 RID echoes for slave1 read");
+        check(rbeats[0] === 16'h55AA, "T12 slave1 read data correct");
+
+        $display("\n===== T13: DECERR read (unmapped) returns all beats =====");
+        ar_send(4'h4, 8'h50, 4'd3);                        // 4-beat read, unmapped
+        r_get(4, gid, gresp);
+        check(gresp === RESP_DECERR, "T13 unmapped read -> DECERR");
+        check(gid === 4'h4,          "T13 RID echoed on error read");
+
         $display("\n===== T9: reset clears the register files =====");
         ARESETn <= 1'b0;
         repeat (2) @(posedge ACLK);
@@ -206,7 +279,7 @@ module top_tb;
     end
 
     initial begin
-        #50000;
+        #100000;
         $display("*** TIMEOUT - design hung ***");
         $finish;
     end
