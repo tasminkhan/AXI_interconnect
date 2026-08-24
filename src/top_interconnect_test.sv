@@ -24,6 +24,7 @@ module top_tb;
     logic [ADDRESS_WIDTH-1:0] ARADDR;
     logic [LEN_WIDTH-1:0]     ARLEN;
     logic [BURST_WIDTH-1:0]   ARBURST;
+    logic [QOS_WIDTH-1:0]     ARQOS;
     logic                     ARVALID, ARREADY;
 
     logic [ID_WIDTH-1:0]      RID;
@@ -49,10 +50,10 @@ module top_tb;
 
     // read a slave register (dbg_regs carries the same data on a port)
     function automatic logic [DATA_WIDTH-1:0] rg0(input int i);
-        return dut.u_slave0.regs[i];
+        return dut.u_slave0.u_regs.regs[i];
     endfunction
     function automatic logic [DATA_WIDTH-1:0] rg1(input int i);
-        return dut.u_slave1.regs[i];
+        return dut.u_slave1.u_regs.regs[i];
     endfunction
 
     //==================================================================

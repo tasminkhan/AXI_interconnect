@@ -25,7 +25,10 @@ module top_reorder1_tb;
         if (c) begin $display("[PASS] %s", n); pass_count++; end
         else   begin $display("[FAIL] %s", n); fail_count++; end
     endtask
-    function automatic logic [DATA_WIDTH-1:0] rg1(input int i); return dut.u_slave1.regs[i]; endfunction
+    
+    function automatic logic [DATA_WIDTH-1:0] rg1(input int i); 
+        return dut.u_slave1.u_regs.regs[i];
+    endfunction
 
     task automatic aw_send(input [ID_WIDTH-1:0] id, input [ADDRESS_WIDTH-1:0] a,
                            input [LEN_WIDTH-1:0] len, input [BURST_WIDTH-1:0] b=BURST_INCR);

@@ -51,14 +51,20 @@ module slave #(
     //-----------------------------------------------------------------
     // Register file : SLAVE_REG_COUNT x DATA_WIDTH, cleared on reset
     //-----------------------------------------------------------------
-    logic [DATA_WIDTH-1:0] regs [0:SLAVE_REG_COUNT-1];
-    
-    genvar g;
-    generate
-        for (g = 0; g < SLAVE_REG_COUNT; g++) begin : g_dbg
-            assign dbg_regs[g*DATA_WIDTH +: DATA_WIDTH] = regs[g];
-        end
-    endgenerate
+    wire regs_we = (weng_state == W_BURST) && WVALID_I && WREADY_O;
+
+    logic [DATA_WIDTH-1:0] rdata;   // read port -> feeds RDATA_O
+
+    regfile u_regs (
+        .ACLK(ACLK), .ARESETn(ARESETn),
+        .we    (regs_we),
+        .waddr (weng_idx),
+        .wdata (WDATA_I),
+        .wstrb (WSTRB_I),
+        .raddr (reng_idx),
+        .rdata (rdata),
+        .dbg_regs (dbg_regs)
+    );
 
     //=================================================================
     // AW FIFO : depth SLAVE_FIFO_DEPTH, {id, addr, len} per entry.
@@ -109,7 +115,6 @@ module slave #(
     // Moore outputs: WREADY only in W_BURST.
     assign WREADY_O = (weng_state == W_BURST);
 
-    integer i;
     always_ff @(posedge ACLK) begin
         if (!ARESETn) begin
             weng_state <= W_IDLE;
@@ -121,8 +126,6 @@ module slave #(
             weng_idx   <= '0;
             weng_len   <= '0;
             weng_beat  <= '0;
-            for (i = 0; i < SLAVE_REG_COUNT; i = i + 1)
-                regs[i] <= '0;
         end else begin
             case (weng_state)
                 //---------------------------------------------------
@@ -140,9 +143,6 @@ module slave #(
                 //---------------------------------------------------
                 W_BURST: begin
                     if (WVALID_I && WREADY_O) begin
-                        for (int b = 0; b < STROBE_WIDTH; b++)
-                            if (WSTRB_I[b])
-                                regs[weng_idx][b*8 +: 8] <= WDATA_I[b*8 +: 8];
                         weng_idx  <= weng_idx + 1'b1;     // +ADDR_STEP bytes = next reg
                         weng_beat <= weng_beat + 1'b1;
                         if (weng_beat == weng_len) begin                
@@ -227,8 +227,7 @@ module slave #(
     // outputs driven from state + current index.
     assign RVALID_O = (reng_state == R_BURST);
     assign RID_O    = reng_id;
-    assign RDATA_O  = regs[reng_idx];
-    assign RRESP_O  = RESP_OKAY;
+    assign RDATA_O = rdata;    assign RRESP_O  = RESP_OKAY;
     assign RLAST_O  = (reng_state == R_BURST) && (reng_beat == reng_len);
 
     always_ff @(posedge ACLK) begin

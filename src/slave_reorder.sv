@@ -58,14 +58,20 @@ module slave_reorder #(
     //-----------------------------------------------------------------
     // Register file : SLAVE_REG_COUNT x DATA_WIDTH, cleared on reset
     //-----------------------------------------------------------------
-    logic [DATA_WIDTH-1:0] regs [0:SLAVE_REG_COUNT-1];
+    wire regs_we = (weng_state == W_BURST) && WVALID_I && WREADY_O;
 
-    genvar g;
-    generate
-        for (g = 0; g < SLAVE_REG_COUNT; g++) begin : g_dbg
-            assign dbg_regs[g*DATA_WIDTH +: DATA_WIDTH] = regs[g];
-        end
-    endgenerate
+    logic [DATA_WIDTH-1:0] rdata;   // read port -> feeds RDATA_O
+
+    regfile u_regs (
+        .ACLK(ACLK), .ARESETn(ARESETn),
+        .we    (regs_we),
+        .waddr (weng_idx),
+        .wdata (WDATA_I),
+        .wstrb (WSTRB_I),
+        .raddr (reng_idx),
+        .rdata (rdata),
+        .dbg_regs (dbg_regs)
+    );
 
     //=================================================================
     //                       WRITE SIDE  : AW FIFO
@@ -114,7 +120,6 @@ module slave_reorder #(
 
     assign WREADY_O = (weng_state == W_BURST);
 
-    integer i;
     always_ff @(posedge ACLK) begin
         if (!ARESETn) begin
             weng_state <= W_IDLE;
@@ -126,8 +131,6 @@ module slave_reorder #(
             weng_idx   <= '0;
             weng_len   <= '0;
             weng_beat  <= '0;
-            for (i = 0; i < SLAVE_REG_COUNT; i = i + 1)
-                regs[i] <= '0;
         end else begin
             case (weng_state)
                 W_IDLE: begin
@@ -138,9 +141,6 @@ module slave_reorder #(
                 end
                 W_BURST: begin
                     if (WVALID_I && WREADY_O) begin
-                        for (int b = 0; b < STROBE_WIDTH; b++)
-                            if (WSTRB_I[b])
-                                regs[weng_idx][b*8 +: 8] <= WDATA_I[b*8 +: 8];
                         weng_idx  <= weng_idx + 1'b1;
                         weng_beat <= weng_beat + 1'b1;
                         if (weng_beat == weng_len) begin
@@ -248,8 +248,7 @@ module slave_reorder #(
 
     assign RVALID_O = (reng_state == R_BURST);
     assign RID_O    = reng_id;
-    assign RDATA_O  = regs[reng_idx];
-    assign RRESP_O  = RESP_OKAY;
+    assign RDATA_O = rdata;    assign RRESP_O  = RESP_OKAY;
     assign RLAST_O  = (reng_state == R_BURST) && (reng_beat == reng_len);
     
     wire reng_advancing =
