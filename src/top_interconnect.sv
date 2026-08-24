@@ -40,6 +40,7 @@ module top (
     input  logic [ADDRESS_WIDTH-1:0]  ARADDR,
     input  logic [LEN_WIDTH-1:0]      ARLEN,
     input  logic [BURST_WIDTH-1:0]    ARBURST,
+    input  logic [QOS_WIDTH-1:0]      ARQOS,
     input  logic                      ARVALID,
     output logic                      ARREADY,
 
@@ -275,9 +276,11 @@ module top (
         .BID(BID), .BRESP(BRESP), .BVALID(BVALID), .BREADY(BREADY),
         
         .ARID(ARID), .ARADDR(ARADDR), .ARLEN(ARLEN), .ARBURST(ARBURST),
+        .ARQOS(ARQOS),
         .ARVALID(ARVALID), .ARREADY(ARREADY),
         .ARID_SKD(ARID_SKD), .ARADDR_SKD(ARADDR_SKD),
         .ARLEN_SKD(ARLEN_SKD), .ARBURST_SKD(ARBURST_SKD),
+        .ARQOS_SKD(ARQOS_SKD),
         .ARVALID_DMUX(ARVALID_DMUX), .ARREADY_MUX(ARREADY_MUX),
 
         .RID_MUX(RID_MUX), .RDATA_MUX(RDATA_MUX), .RRESP_MUX(RRESP_MUX),

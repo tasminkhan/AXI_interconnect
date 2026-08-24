@@ -5,7 +5,8 @@ import param_pkg::*;
 
 module master (
     input  logic                      ACLK,
-    input  logic                      ARESETn,
+    input 
+     logic                      ARESETn,
 
     //================ AW channel : testbench side =====================
     input  logic [ID_WIDTH-1:0]       AWID,
@@ -54,6 +55,7 @@ module master (
     input  logic [ADDRESS_WIDTH-1:0]  ARADDR,
     input  logic [LEN_WIDTH-1:0]      ARLEN,
     input  logic [BURST_WIDTH-1:0]    ARBURST,
+    input  logic [QOS_WIDTH-1:0]      ARQOS,
     input  logic                      ARVALID,
     output logic                      ARREADY,
 
@@ -62,6 +64,7 @@ module master (
     output logic [ADDRESS_WIDTH-1:0]  ARADDR_SKD,
     output logic [LEN_WIDTH-1:0]      ARLEN_SKD,
     output logic [BURST_WIDTH-1:0]    ARBURST_SKD,
+    output  logic [QOS_WIDTH-1:0]     ARQOS_SKD,
     output logic                      ARVALID_DMUX,
     input  logic                      ARREADY_MUX,
 
@@ -141,11 +144,11 @@ module master (
     //-----------------------------------------------------------------
     // AR skid buffer : pack {ID, ADDR, LEN, BURST} (same width as AW)
     //-----------------------------------------------------------------
-    logic [AW_PAYLOAD_WIDTH-1:0] ar_pack_in, ar_pack_out;
-    assign ar_pack_in = {ARID, ARADDR, ARLEN, ARBURST};
-    assign {ARID_SKD, ARADDR_SKD, ARLEN_SKD, ARBURST_SKD} = ar_pack_out;
+    logic [AR_PAYLOAD_WIDTH-1:0] ar_pack_in, ar_pack_out;
+    assign ar_pack_in = {ARID, ARADDR, ARLEN, ARBURST, ARQOS};
+    assign {ARID_SKD, ARADDR_SKD, ARLEN_SKD, ARBURST_SKD, ARQOS_SKD} = ar_pack_out;
 
-    skidbuffer #(.WIDTH(AW_PAYLOAD_WIDTH)) u_ar_skid (
+    skidbuffer #(.WIDTH(AR_PAYLOAD_WIDTH)) u_ar_skid (
         .clk(ACLK), .rst_n(ARESETn),
         .in_data(ar_pack_in), .in_valid(ARVALID), .in_ready(ARREADY),
         .out_data(ar_pack_out), .out_valid(ARVALID_DMUX), .out_ready(ARREADY_MUX)

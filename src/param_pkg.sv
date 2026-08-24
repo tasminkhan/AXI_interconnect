@@ -10,6 +10,12 @@ package param_pkg;
     localparam int ID_WIDTH      = 4;
     localparam int LEN_WIDTH     = 4;
 
+    //------------------ priority things -------------------------
+    localparam int QOS_WIDTH = 4;                  // priority value width
+    localparam int AGE_WIDTH = 4;                  // starvation age counter width
+    localparam logic [QOS_WIDTH-1:0] QOS_MAX      = {QOS_WIDTH{1'b1}};
+    localparam logic [AGE_WIDTH-1:0] STARVE_LIMIT = 4'd8;
+    
     //------------------ spec-fixed constants --------------------
     localparam int BURST_WIDTH   = 2;
     localparam int RESP_WIDTH    = 2;
@@ -17,6 +23,7 @@ package param_pkg;
     //------------------ derived widths --------------------------
     localparam int STROBE_WIDTH     = DATA_WIDTH/8;
     localparam int AW_PAYLOAD_WIDTH = ID_WIDTH+ADDRESS_WIDTH+LEN_WIDTH+BURST_WIDTH;
+    localparam int AR_PAYLOAD_WIDTH = AW_PAYLOAD_WIDTH + QOS_WIDTH;
     localparam int W_PAYLOAD_WIDTH  = DATA_WIDTH+STROBE_WIDTH+1;
     localparam int B_PAYLOAD_WIDTH  = ID_WIDTH+RESP_WIDTH;
 

@@ -227,7 +227,20 @@ module top_tb;
         b_get(gid, gresp);
         check(gid === 4'hE,            "T8 BID echoed on mismatch");
         check(gresp === RESP_SLVERR,   "T8 missing WLAST -> SLVERR (no hang)");
-
+        
+        $display("\n===== T14: dipless burst write (AW->W gap lets slave reach W_BURST) =====");
+        // Same 4-beat burst as T2, but we let the slave pop the AW and
+        // enter W_BURST *before* the first W beat arrives. WREADY is then
+        // already high when data streams, so the skid never fills and
+        // WREADY holds high for the whole burst - no startup dip.
+        aw_send(4'hF, SLAVE0_BASE + 8'd8, 4'd3);   // regs 4..7
+        @(posedge ACLK);                            // <-- the one-cycle gap: slave reaches W_BURST here
+        w_send(4, 16'hC000);                        // stream unchanged after the gap
+        b_get(gid, gresp);
+        check(gid === 4'hF && gresp === RESP_OKAY,  "T14 dipless burst OKAY, BID echoed");
+        check(rg0(4)===16'hC000 && rg0(5)===16'hC001 &&
+              rg0(6)===16'hC002 && rg0(7)===16'hC003, "T14 regs 4..7 stored");
+              
         $display("\n===== T10: single-beat read-back from slave0 =====");
         write1(4'h1, SLAVE0_BASE, 16'h1234, gresp);      // reg0 <- 1234
         ar_send(4'h1, SLAVE0_BASE, 4'd0);
