@@ -1,20 +1,10 @@
-//=====================================================================
-// top.sv  (AXI4 write path: AW, W, B)
-//---------------------------------------------------------------------
-//  testbench ==AW/W==> [master: skid buffers] ==*_SKD==> decoder/demux ==> slaves
-//  testbench <==B===== [master: B skid]      <==*_MUX== response mux  <== slaves
-//
-// All widths come from axi_pkg, imported BEFORE the port list so the
-// ports themselves are parameterized.
-//=====================================================================
-
 import param_pkg::*;
 
 module top (
     input  logic                      ACLK,
     input  logic                      ARESETn,
 
-    //---------------- AW channel -------------------------------------
+    //================ AW CHANNEL =====================================
     input  logic [ID_WIDTH-1:0]       AWID,
     input  logic [ADDRESS_WIDTH-1:0]  AWADDR,
     input  logic [LEN_WIDTH-1:0]      AWLEN,
@@ -22,20 +12,20 @@ module top (
     input  logic                      AWVALID,
     output logic                      AWREADY,
 
-    //---------------- W channel --------------------------------------
+    //================ W CHANNEL ======================================
     input  logic [DATA_WIDTH-1:0]     WDATA,
     input  logic [STROBE_WIDTH-1:0]   WSTRB,
     input  logic                      WLAST,
     input  logic                      WVALID,
     output logic                      WREADY,
 
-    //---------------- B channel --------------------------------------
+    //================ B CHANNEL ======================================
     output logic [ID_WIDTH-1:0]       BID,
     output logic [RESP_WIDTH-1:0]     BRESP,
     output logic                      BVALID,
     input  logic                      BREADY,
 
-    //---------------- AR channel -------------------------------------
+    //================ AR CHANNEL =====================================
     input  logic [ID_WIDTH-1:0]       ARID,
     input  logic [ADDRESS_WIDTH-1:0]  ARADDR,
     input  logic [LEN_WIDTH-1:0]      ARLEN,
@@ -44,7 +34,7 @@ module top (
     input  logic                      ARVALID,
     output logic                      ARREADY,
 
-    //---------------- R channel --------------------------------------
+    //================ R CHANNEL ======================================
     output logic [ID_WIDTH-1:0]       RID,
     output logic [DATA_WIDTH-1:0]     RDATA,
     output logic [RESP_WIDTH-1:0]     RRESP,
@@ -53,9 +43,7 @@ module top (
     input  logic                      RREADY
 );
 
-    //=================================================================
-    // Fabric-side nets
-    //=================================================================
+    //================ FABRIC-SIDE NETS ===============================
     logic [ID_WIDTH-1:0]      AWID_SKD;
     logic [ADDRESS_WIDTH-1:0] AWADDR_SKD;
     logic [LEN_WIDTH-1:0]     AWLEN_SKD;
@@ -81,11 +69,12 @@ module top (
     logic [ID_WIDTH-1:0]   BID_MUX;
     logic [RESP_WIDTH-1:0] BRESP_MUX;
     logic                  BVALID_MUX, BREADY_DMUX;
-    
+
     logic [ID_WIDTH-1:0]      ARID_SKD;
     logic [ADDRESS_WIDTH-1:0] ARADDR_SKD;
     logic [LEN_WIDTH-1:0]     ARLEN_SKD;
     logic [BURST_WIDTH-1:0]   ARBURST_SKD;
+    logic [QOS_WIDTH-1:0]     ARQOS_SKD;
     logic ARVALID_S0, ARVALID_S1, ARVALID_ERR;
     logic ARREADY_S0, ARREADY_S1, ARREADY_ERR;
     logic ARVALID_DMUX, ARREADY_MUX;
@@ -102,9 +91,32 @@ module top (
     logic [RESP_WIDTH-1:0] RRESP_MUX;
     logic RLAST_MUX, RVALID_MUX, RREADY_DMUX;
 
-    //=================================================================
-    // DECODER (combinational) - target select + burst pre-check.
-    //=================================================================
+    //================ ID SCOREBOARD ==================================
+    localparam int NUM_IDS = 1 << ID_WIDTH;
+    logic [NUM_IDS-1:0] aw_id_busy;
+    logic [NUM_IDS-1:0] ar_id_busy;
+
+    wire aw_issue    = AWVALID_DMUX & AWREADY_MUX;
+    wire b_retire    = BVALID_MUX   & BREADY_DMUX;
+    wire aw_id_stall = aw_id_busy[AWID_SKD];
+
+    wire ar_issue    = ARVALID_DMUX & ARREADY_MUX;
+    wire r_retire    = RVALID_MUX   & RREADY_DMUX & RLAST_MUX;
+    wire ar_id_stall = ar_id_busy[ARID_SKD];
+
+    always_ff @(posedge ACLK) begin
+        if (!ARESETn) begin
+            aw_id_busy <= '0;
+            ar_id_busy <= '0;
+        end else begin
+            if (b_retire) aw_id_busy[BID_MUX]  <= 1'b0;
+            if (aw_issue) aw_id_busy[AWID_SKD] <= 1'b1;
+            if (r_retire) ar_id_busy[RID_MUX]  <= 1'b0;
+            if (ar_issue) ar_id_busy[ARID_SKD] <= 1'b1;
+        end
+    end
+
+    //================ AW DECODER =====================================
     logic [SELECT_WIDTH-1:0] aw_sel;
 
     aw_decoder u_awdecoder (
@@ -114,16 +126,11 @@ module top (
         .aw_sel      (aw_sel)
     );
 
-    //=================================================================
-    // SELECT FIFO - one memory, one write pointer, one read pointer.
-    //=================================================================
-    // Each entry stores the target AND the burst length, so the fabric
-    // can count beats itself. Termination is COUNTER-authoritative
-    // (w_beat == len) with WLAST as an early terminator 
+    //================ SELECT FIFO ====================================
     logic [SELECT_WIDTH-1:0]     sel_mem [0:SELECT_FIFO_DEPTH-1];
     logic [LEN_WIDTH-1:0]        len_mem [0:SELECT_FIFO_DEPTH-1];
     logic [SELECT_PTR_WIDTH-1:0] sel_aw_wp, sel_w_rp;
-    logic [BEAT_COUNT_WIDTH-1:0] w_beat;              // beats seen in current burst
+    logic [BEAT_COUNT_WIDTH-1:0] w_beat;
 
     wire sel_empty = (sel_aw_wp == sel_w_rp);
     wire sel_full  = (sel_aw_wp[SELECT_PTR_WIDTH-2:0] == sel_w_rp[SELECT_PTR_WIDTH-2:0])
@@ -132,31 +139,23 @@ module top (
     wire [SELECT_WIDTH-1:0] wsel_head = sel_mem[sel_w_rp[SELECT_PTR_WIDTH-2:0]];
     wire [LEN_WIDTH-1:0]    wlen_head = len_mem[sel_w_rp[SELECT_PTR_WIDTH-2:0]];
 
-    wire w_hs       = WVALID_DMUX & WREADY_MUX;       // a beat transferred
+    wire w_hs        = WVALID_DMUX & WREADY_MUX;
     wire w_burst_end = w_hs & ((w_beat == wlen_head) | WLAST_SKD);
 
-    //=================================================================
-    // AW DEMUX (live decode) : payload broadcast, VALID steered.
-    // AW acceptance is stalled while the select FIFO is full.
-    //=================================================================
+    //================ AW DEMUX =======================================
     always_comb begin
-        AWVALID_S0  = AWVALID_DMUX & ~sel_full & (aw_sel == SEL_S0);
-        AWVALID_S1  = AWVALID_DMUX & ~sel_full & (aw_sel == SEL_S1);
-        AWVALID_ERR = AWVALID_DMUX & ~sel_full & (aw_sel == SEL_ERR);
+        AWVALID_S0  = AWVALID_DMUX & ~sel_full & ~aw_id_stall & (aw_sel == SEL_S0);
+        AWVALID_S1  = AWVALID_DMUX & ~sel_full & ~aw_id_stall & (aw_sel == SEL_S1);
+        AWVALID_ERR = AWVALID_DMUX & ~sel_full & ~aw_id_stall & (aw_sel == SEL_ERR);
 
         case (aw_sel)
-            SEL_S0:  AWREADY_MUX = AWREADY_S0  & ~sel_full;
-            SEL_S1:  AWREADY_MUX = AWREADY_S1  & ~sel_full;
-            default: AWREADY_MUX = AWREADY_ERR & ~sel_full;
+            SEL_S0:  AWREADY_MUX = AWREADY_S0  & ~sel_full & ~aw_id_stall;
+            SEL_S1:  AWREADY_MUX = AWREADY_S1  & ~sel_full & ~aw_id_stall;
+            default: AWREADY_MUX = AWREADY_ERR & ~sel_full & ~aw_id_stall;
         endcase
     end
 
-    //=================================================================
-    // W DEMUX (latched select = wsel_head) : payload broadcast,
-    // VALID steered by the OLDEST burst still awaiting data. W is held
-    // off until an AW has been accepted - beats have no routing before
-    // their address, so a stale wsel_head can never steer a beat.
-    //=================================================================
+    //================ W DEMUX ========================================
     always_comb begin
         WVALID_S0  = WVALID_DMUX & ~sel_empty & (wsel_head == SEL_S0);
         WVALID_S1  = WVALID_DMUX & ~sel_empty & (wsel_head == SEL_S1);
@@ -168,32 +167,28 @@ module top (
             default: WREADY_MUX = WREADY_ERR & ~sel_empty;
         endcase
     end
-    
-    //=================================================================
-    // Sequential : select FIFO pointers 
-    //=================================================================
+
+    //================ SELECT FIFO POINTERS ===========================
     always_ff @(posedge ACLK) begin
         if (!ARESETn) begin
             sel_aw_wp <= '0;
             sel_w_rp  <= '0;
             w_beat    <= '0;
         end else begin
-            if (AWVALID_DMUX && AWREADY_MUX) begin           // address accepted
+            if (AWVALID_DMUX && AWREADY_MUX) begin
                 sel_mem[sel_aw_wp[SELECT_PTR_WIDTH-2:0]] <= aw_sel;
                 len_mem[sel_aw_wp[SELECT_PTR_WIDTH-2:0]] <= AWLEN_SKD;
                 sel_aw_wp <= sel_aw_wp + 1'b1;
             end
-            if (w_burst_end) begin                // burst data done -> retire entry
+            if (w_burst_end) begin
                 sel_w_rp <= sel_w_rp + 1'b1;
                 w_beat   <= '0;
-            end else if (w_hs)                    // mid-burst beat
+            end else if (w_hs)
                 w_beat <= w_beat + 1'b1;
         end
     end
-    
-    //=================================================================
-    // B ARBITER + MUX, Muxing in round robin fashion
-    //=================================================================
+
+    //================ B ARBITER + MUX ================================
     b_arbiter u_b_arbiter (
         .ACLK(ACLK), .ARESETn(ARESETn),
 
@@ -206,10 +201,8 @@ module top (
         .BID_MUX(BID_MUX), .BRESP_MUX(BRESP_MUX),
         .BVALID_MUX(BVALID_MUX), .BREADY_DMUX(BREADY_DMUX)
     );
-    
-    //=================================================================
-    // AR DECODER (combinational) - target select + burst pre-check.
-    //=================================================================
+
+    //================ AR DECODER =====================================
     logic [SELECT_WIDTH-1:0] ar_sel;
 
     ar_decoder u_ardecoder (
@@ -219,26 +212,20 @@ module top (
         .ar_sel      (ar_sel)
     );
 
-    //=================================================================
-    // AR DEMUX (live decode) : payload broadcast, VALID steered.
-    // R routes itself by RID through the arbiter; 
-    // each slave's AR FIFO backpressures via ARREADY.
-    //=================================================================
+    //================ AR DEMUX =======================================
     always_comb begin
-        ARVALID_S0  = ARVALID_DMUX & (ar_sel == SEL_S0);
-        ARVALID_S1  = ARVALID_DMUX & (ar_sel == SEL_S1);
-        ARVALID_ERR = ARVALID_DMUX & (ar_sel == SEL_ERR);
+        ARVALID_S0  = ARVALID_DMUX & ~ar_id_stall & (ar_sel == SEL_S0);
+        ARVALID_S1  = ARVALID_DMUX & ~ar_id_stall & (ar_sel == SEL_S1);
+        ARVALID_ERR = ARVALID_DMUX & ~ar_id_stall & (ar_sel == SEL_ERR);
 
         case (ar_sel)
-            SEL_S0:  ARREADY_MUX = ARREADY_S0;
-            SEL_S1:  ARREADY_MUX = ARREADY_S1;
-            default: ARREADY_MUX = ARREADY_ERR;
+            SEL_S0:  ARREADY_MUX = ARREADY_S0  & ~ar_id_stall;
+            SEL_S1:  ARREADY_MUX = ARREADY_S1  & ~ar_id_stall;
+            default: ARREADY_MUX = ARREADY_ERR & ~ar_id_stall;
         endcase
     end
 
-    //=================================================================
-    // R ARBITER + MUX (round-robin, burst-locked to RLAST)
-    //=================================================================
+    //================ R ARBITER + MUX ================================
     r_arbiter u_r_arbiter (
         .ACLK(ACLK), .ARESETn(ARESETn),
         .RID_S0(RID_S0),     .RID_S1(RID_S1),     .RID_ERR(RID_ERR),
@@ -250,10 +237,8 @@ module top (
         .RID_MUX(RID_MUX), .RDATA_MUX(RDATA_MUX), .RRESP_MUX(RRESP_MUX),
         .RLAST_MUX(RLAST_MUX), .RVALID_MUX(RVALID_MUX), .RREADY_DMUX(RREADY_DMUX)
     );
-    
-    //=================================================================
-    // Master : the three always-on skid buffers
-    //=================================================================
+
+    //================ MASTER =========================================
     master u_master (
         .ACLK(ACLK), .ARESETn(ARESETn),
 
@@ -274,7 +259,7 @@ module top (
         .BVALID_MUX(BVALID_MUX), .BREADY_DMUX(BREADY_DMUX),
 
         .BID(BID), .BRESP(BRESP), .BVALID(BVALID), .BREADY(BREADY),
-        
+
         .ARID(ARID), .ARADDR(ARADDR), .ARLEN(ARLEN), .ARBURST(ARBURST),
         .ARQOS(ARQOS),
         .ARVALID(ARVALID), .ARREADY(ARREADY),
@@ -289,9 +274,7 @@ module top (
         .RLAST(RLAST), .RVALID(RVALID), .RREADY(RREADY)
     );
 
-    //=================================================================
-    // Slaves : payload broadcast, per-target VALID/READY wired
-    //=================================================================
+    //================ SLAVE 0 ========================================
     slave #(.BASE_ADDR(SLAVE0_BASE)) u_slave0 (
         .ACLK(ACLK), .ARESETn(ARESETn),
         .AWID_I(AWID_SKD), .AWADDR_I(AWADDR_SKD), .AWLEN_I(AWLEN_SKD),
@@ -306,6 +289,7 @@ module top (
         .RLAST_O(RLAST_S0), .RVALID_O(RVALID_S0), .RREADY_I(RREADY_S0)
     );
 
+    //================ SLAVE 1 ========================================
     slave #(.BASE_ADDR(SLAVE1_BASE)) u_slave1 (
         .ACLK(ACLK), .ARESETn(ARESETn),
         .AWID_I(AWID_SKD), .AWADDR_I(AWADDR_SKD), .AWLEN_I(AWLEN_SKD),
@@ -320,9 +304,7 @@ module top (
         .RLAST_O(RLAST_S1), .RVALID_O(RVALID_S1), .RREADY_I(RREADY_S1)
     );
 
-    //=================================================================
-    // Pseudo-slave : terminates DECERR bursts (drains beats, no write)
-    //=================================================================
+    //================ ERR SLAVE ======================================
     err_slave u_err_slave (
         .ACLK(ACLK), .ARESETn(ARESETn),
         .AWID_I(AWID_SKD), .AWLEN_I(AWLEN_SKD),

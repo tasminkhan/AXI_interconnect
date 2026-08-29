@@ -4,6 +4,7 @@ module top_seq1 (
     input  logic                      ACLK,
     input  logic                      ARESETn,
 
+    //================ AW CHANNEL =====================================
     input  logic [ID_WIDTH-1:0]       AWID,
     input  logic [ADDRESS_WIDTH-1:0]  AWADDR,
     input  logic [LEN_WIDTH-1:0]      AWLEN,
@@ -11,17 +12,20 @@ module top_seq1 (
     input  logic                      AWVALID,
     output logic                      AWREADY,
 
+    //================ W CHANNEL ======================================
     input  logic [DATA_WIDTH-1:0]     WDATA,
     input  logic [STROBE_WIDTH-1:0]   WSTRB,
     input  logic                      WLAST,
     input  logic                      WVALID,
     output logic                      WREADY,
 
+    //================ B CHANNEL ======================================
     output logic [ID_WIDTH-1:0]       BID,
     output logic [RESP_WIDTH-1:0]     BRESP,
     output logic                      BVALID,
     input  logic                      BREADY,
 
+    //================ AR CHANNEL =====================================
     input  logic [ID_WIDTH-1:0]       ARID,
     input  logic [ADDRESS_WIDTH-1:0]  ARADDR,
     input  logic [LEN_WIDTH-1:0]      ARLEN,
@@ -30,6 +34,7 @@ module top_seq1 (
     input  logic                      ARVALID,
     output logic                      ARREADY,
 
+    //================ R CHANNEL ======================================
     output logic [ID_WIDTH-1:0]       RID,
     output logic [DATA_WIDTH-1:0]     RDATA,
     output logic [RESP_WIDTH-1:0]     RRESP,
@@ -37,6 +42,7 @@ module top_seq1 (
     output logic                      RVALID,
     input  logic                      RREADY
 );
+    //================ FABRIC-SIDE NETS ===============================
     logic [ID_WIDTH-1:0]      AWID_SKD;
     logic [ADDRESS_WIDTH-1:0] AWADDR_SKD;
     logic [LEN_WIDTH-1:0]     AWLEN_SKD;
@@ -84,12 +90,39 @@ module top_seq1 (
     logic [RESP_WIDTH-1:0] RRESP_MUX;
     logic RLAST_MUX, RVALID_MUX, RREADY_DMUX;
 
+    //================ ID SCOREBOARD ==================================
+    localparam int NUM_IDS = 1 << ID_WIDTH;
+    logic [NUM_IDS-1:0] aw_id_busy;
+    logic [NUM_IDS-1:0] ar_id_busy;
+
+    wire aw_issue    = AWVALID_DMUX & AWREADY_MUX;
+    wire b_retire    = BVALID_MUX   & BREADY_DMUX;
+    wire aw_id_stall = aw_id_busy[AWID_SKD];
+
+    wire ar_issue    = ARVALID_DMUX & ARREADY_MUX;
+    wire r_retire    = RVALID_MUX   & RREADY_DMUX & RLAST_MUX;
+    wire ar_id_stall = ar_id_busy[ARID_SKD];
+
+    always_ff @(posedge ACLK) begin
+        if (!ARESETn) begin
+            aw_id_busy <= '0;
+            ar_id_busy <= '0;
+        end else begin
+            if (b_retire) aw_id_busy[BID_MUX]  <= 1'b0;
+            if (aw_issue) aw_id_busy[AWID_SKD] <= 1'b1;
+            if (r_retire) ar_id_busy[RID_MUX]  <= 1'b0;
+            if (ar_issue) ar_id_busy[ARID_SKD] <= 1'b1;
+        end
+    end
+
+    //================ AW DECODER =====================================
     logic [SELECT_WIDTH-1:0] aw_sel;
     aw_decoder_1 u_awdecoder (
         .AWADDR_SKD(AWADDR_SKD), .AWLEN_SKD(AWLEN_SKD),
         .AWBURST_SKD(AWBURST_SKD), .aw_sel(aw_sel)
     );
 
+    //================ SELECT FIFO ====================================
     logic [SELECT_WIDTH-1:0]     sel_mem [0:SELECT_FIFO_DEPTH-1];
     logic [LEN_WIDTH-1:0]        len_mem [0:SELECT_FIFO_DEPTH-1];
     logic [SELECT_PTR_WIDTH-1:0] sel_aw_wp, sel_w_rp;
@@ -105,15 +138,17 @@ module top_seq1 (
     wire w_hs        = WVALID_DMUX & WREADY_MUX;
     wire w_burst_end = w_hs & ((w_beat == wlen_head) | WLAST_SKD);
 
+    //================ AW DEMUX =======================================
     always_comb begin
-        AWVALID_S1  = AWVALID_DMUX & ~sel_full & (aw_sel == SEL_S1);
-        AWVALID_ERR = AWVALID_DMUX & ~sel_full & (aw_sel == SEL_ERR);
+        AWVALID_S1  = AWVALID_DMUX & ~sel_full & ~aw_id_stall & (aw_sel == SEL_S1);
+        AWVALID_ERR = AWVALID_DMUX & ~sel_full & ~aw_id_stall & (aw_sel == SEL_ERR);
         case (aw_sel)
-            SEL_S1:  AWREADY_MUX = AWREADY_S1  & ~sel_full;
-            default: AWREADY_MUX = AWREADY_ERR & ~sel_full;
+            SEL_S1:  AWREADY_MUX = AWREADY_S1  & ~sel_full & ~aw_id_stall;
+            default: AWREADY_MUX = AWREADY_ERR & ~sel_full & ~aw_id_stall;
         endcase
     end
 
+    //================ W DEMUX ========================================
     always_comb begin
         WVALID_S1  = WVALID_DMUX & ~sel_empty & (wsel_head == SEL_S1);
         WVALID_ERR = WVALID_DMUX & ~sel_empty & (wsel_head == SEL_ERR);
@@ -123,6 +158,7 @@ module top_seq1 (
         endcase
     end
 
+    //================ SELECT FIFO POINTERS ===========================
     always_ff @(posedge ACLK) begin
         if (!ARESETn) begin
             sel_aw_wp <= '0; sel_w_rp <= '0; w_beat <= '0;
@@ -140,6 +176,7 @@ module top_seq1 (
         end
     end
 
+    //================ B ARBITER + MUX ================================
     b_arbiter1 u_b_arbiter (
         .ACLK(ACLK), .ARESETn(ARESETn),
         .BID_S1(BID_S1), .BID_ERR(BID_ERR),
@@ -150,21 +187,24 @@ module top_seq1 (
         .BVALID_MUX(BVALID_MUX), .BREADY_DMUX(BREADY_DMUX)
     );
 
+    //================ AR DECODER =====================================
     logic [SELECT_WIDTH-1:0] ar_sel;
     ar_decoder_1 u_ardecoder (
         .ARADDR_SKD(ARADDR_SKD), .ARLEN_SKD(ARLEN_SKD),
         .ARBURST_SKD(ARBURST_SKD), .ar_sel(ar_sel)
     );
 
+    //================ AR DEMUX =======================================
     always_comb begin
-        ARVALID_S1  = ARVALID_DMUX & (ar_sel == SEL_S1);
-        ARVALID_ERR = ARVALID_DMUX & (ar_sel == SEL_ERR);
+        ARVALID_S1  = ARVALID_DMUX & ~ar_id_stall & (ar_sel == SEL_S1);
+        ARVALID_ERR = ARVALID_DMUX & ~ar_id_stall & (ar_sel == SEL_ERR);
         case (ar_sel)
-            SEL_S1:  ARREADY_MUX = ARREADY_S1;
-            default: ARREADY_MUX = ARREADY_ERR;
+            SEL_S1:  ARREADY_MUX = ARREADY_S1  & ~ar_id_stall;
+            default: ARREADY_MUX = ARREADY_ERR & ~ar_id_stall;
         endcase
     end
 
+    //================ R ARBITER + MUX ================================
     r_arbiter1 u_r_arbiter (
         .ACLK(ACLK), .ARESETn(ARESETn),
         .RID_S1(RID_S1), .RID_ERR(RID_ERR),
@@ -177,6 +217,7 @@ module top_seq1 (
         .RLAST_MUX(RLAST_MUX), .RVALID_MUX(RVALID_MUX), .RREADY_DMUX(RREADY_DMUX)
     );
 
+    //================ MASTER =========================================
     master u_master (
         .ACLK(ACLK), .ARESETn(ARESETn),
         .AWID(AWID), .AWADDR(AWADDR), .AWLEN(AWLEN), .AWBURST(AWBURST),
@@ -204,7 +245,8 @@ module top_seq1 (
         .RLAST(RLAST), .RVALID(RVALID), .RREADY(RREADY)
     );
 
-    slave #(.BASE_ADDR(SLAVE1_BASE)) u_slave1 (
+    //================ SLAVE 1 ========================================
+slave #(.BASE_ADDR(SLAVE1_BASE)) u_slave1 (
         .ACLK(ACLK), .ARESETn(ARESETn),
         .AWID_I(AWID_SKD), .AWADDR_I(AWADDR_SKD), .AWLEN_I(AWLEN_SKD),
         .AWVALID_I(AWVALID_S1), .AWREADY_O(AWREADY_S1),
@@ -217,7 +259,7 @@ module top_seq1 (
         .RID_O(RID_S1), .RDATA_O(RDATA_S1), .RRESP_O(RRESP_S1),
         .RLAST_O(RLAST_S1), .RVALID_O(RVALID_S1), .RREADY_I(RREADY_S1)
     );
-
+    //================ ERR SLAVE ======================================
     err_slave u_err_slave (
         .ACLK(ACLK), .ARESETn(ARESETn),
         .AWID_I(AWID_SKD), .AWLEN_I(AWLEN_SKD),
