@@ -1,0 +1,10 @@
+# Ignore everything by default
+
+
+# Keep only these folders and the repo essentials
+!.gitignore
+!README.md
+!docs
+!img
+!report
+!src
