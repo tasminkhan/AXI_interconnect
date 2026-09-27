@@ -1,5 +1,4 @@
 `timescale 1ns/1ps
-//=====================================================================
 
 module skidbuffer_tb;
 
@@ -23,14 +22,7 @@ module skidbuffer_tb;
         .dbg_out_full(dbg_out_full), .dbg_tmp_full(dbg_tmp_full),
         .dbg_in_ready_early(dbg_in_ready_early)
     );
-
-    always #5 clk = ~clk;
-
-    // drive an incrementing payload; advance only on a real input handshake
-    logic [WIDTH-1:0] seq = 5;
-    assign in_data = seq;
-    always @(posedge clk) if (rst_n && in_valid && in_ready) seq <= seq + 1;
-
+    
     // ---- per-cycle observation table ----
     // Sampled just after each posedge (via a #1 in the loop) so the
     // register values shown are the post-edge state for that cycle.
@@ -40,6 +32,13 @@ module skidbuffer_tb;
                  dbg_out_full, dbg_tmp_full, dbg_out_reg, dbg_tmp_reg,
                  in_data, dbg_in_ready_early);
     endtask
+    
+    always #5 clk = ~clk;
+
+    // drive an incrementing payload; advance only on a real input handshake
+    logic [WIDTH-1:0] seq = 5;
+    assign in_data = seq;
+    always @(posedge clk) if (rst_n && in_valid && in_ready) seq <= seq + 1;
 
     integer i;
     initial begin
@@ -48,17 +47,18 @@ module skidbuffer_tb;
 
         rst_n = 0; in_valid = 0; out_ready = 0;
         repeat (3) @(posedge clk);
+        #1;
         rst_n = 1;
         @(posedge clk);
 
-        $display("cyc | inV   inR | outV outR || flags          | regs              | data  | early");
-        $display("----+-----------+-----------++----------------+-------------------+-------+------");
+        $display("cyc | inV   inR   | outV   outR   || flags                 | regs                  | data       | early    ");
+        $display("----+-------------+---------------++-----------------------+-----------------------+------------+----------");
 
         // A directed sequence you can read easily:
         //  - stream a few beats
         //  - stall downstream so tmp fills
         //  - resume
-        for (i = 0; i < 24; i++) begin
+        for (i = 0; i < 15; i++) begin
             case (i)
                 0,1,2:        begin in_valid<=1; out_ready<=1; end // stream
                 3,4:          begin in_valid<=1; out_ready<=0; end // stall -> fill out then tmp
@@ -67,12 +67,11 @@ module skidbuffer_tb;
                 8:            begin in_valid<=1; out_ready<=0; end // stall again
                 9,10:         begin in_valid<=1; out_ready<=1; end // drain
                 default:      begin in_valid<=0; out_ready<=1; end // empty out
-            endcase
-            #1;             
+            endcase             
             show(i);
+            #1;
             @(posedge clk);
         end
-
         $finish;
     end
 

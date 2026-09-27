@@ -5,4 +5,7 @@
 !.gitignore
 !README.md
 !src/
-!image/
+!doc/
+
+# ...but never Office lock/temp files
+~$*
